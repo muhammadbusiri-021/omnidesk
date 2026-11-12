@@ -1,0 +1,23 @@
+{
+  "name": "omnidesk",
+  "version": "1.2.0",
+  "description": "Open-source Peer-to-Peer Remote Desktop Utility with End-to-End Encryption (DTLS-SRTP)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "remote-desktop",
+    "webrtc",
+    "peer-to-peer",
+    "e2ee",
+    "sendinput",
+    "screen-sharing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "ws": "^8.22.2"
+  }
+}

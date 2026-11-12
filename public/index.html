@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniDesk — Native Peer-to-Peer Remote Console</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/vendor/peerjs.min.js"></script>
+  <script>
+    if (typeof Peer === 'undefined') {
+      document.write('<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Top Utility Bar -->
+  <header class="app-topbar">
+    <div class="brand-block">
+      <svg class="brand-icon" viewBox="0 0 24 24">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+      </svg>
+      <span class="brand-name">OmniDesk</span>
+      <span class="brand-version">v1.2.0</span>
+    </div>
+
+    <!-- Segmented Tab Navigation -->
+    <div class="segmented-control">
+      <button class="tab-btn active" id="tabHostBtn" onclick="switchView('host')">
+        Sesi Lokal (Host)
+      </button>
+      <button class="tab-btn" id="tabControllerBtn" onclick="switchView('controller')">
+        Kendalikan Remote (Client)
+      </button>
+    </div>
+
+    <!-- Status Indicator -->
+    <div class="topbar-status">
+      <span class="status-dot online" id="networkStatusDot"></span>
+      <span id="networkStatusText">P2P Siap</span>
+    </div>
+  </header>
+
+  <!-- Main View Container -->
+  <main class="app-container">
+
+    <!-- VIEW 1: HOST (KOMPUTER INI) -->
+    <section class="view-section active" id="viewHost">
+      <div class="host-grid">
+        <!-- Panel Kredensial Akses -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Kredensial Sesi Remote</span>
+            <span style="font-size: 11px; color: var(--text-dim);">P2P DTLS-SRTP</span>
+          </div>
+          <div class="panel-body">
+            <!-- ID Perangkat -->
+            <div class="field-row">
+              <label class="field-label">ID Perangkat Ini</label>
+              <div class="field-value-box">
+                <span class="id-display" id="hostDeviceId">--- --- ---</span>
+                <button class="btn btn-default" onclick="copyToClipboard('hostDeviceId', 'ID Perangkat')">
+                  Salin
+                </button>
+              </div>
+            </div>
+
+            <!-- PIN Sesi -->
+            <div class="field-row">
+              <label class="field-label">Password Sesi (PIN)</label>
+              <div class="field-value-box">
+                <span class="pin-display" id="hostDevicePin">------</span>
+                <button class="btn btn-default" onclick="regeneratePin()">
+                  Acak Ulang
+                </button>
+              </div>
+            </div>
+
+            <!-- Tombol Mulai Siaran -->
+            <button class="btn btn-primary btn-action-large" id="btnStartSharing" onclick="startHostSharing()">
+              Mulai Siaran Layar
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel Telemetri & Status Sistem -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Telemetri Sistem</span>
+            <span style="font-size: 11px; color: var(--accent-green);">Engine Siap</span>
+          </div>
+          <div class="panel-body" style="padding: 12px 16px;">
+            <table class="diag-table">
+              <tr>
+                <td class="label">Resolusi Layar</td>
+                <td class="value" id="diagResolution">1920 × 1080 (DPI-Aware)</td>
+              </tr>
+              <tr>
+                <td class="label">Input Driver</td>
+                <td class="value">Windows user32 SendInput</td>
+              </tr>
+              <tr>
+                <td class="label">Protokol Media</td>
+                <td class="value">WebRTC H.264/VP8 (60 FPS)</td>
+              </tr>
+              <tr>
+                <td class="label">Relay STUN</td>
+                <td class="value">stun.l.google.com:19302</td>
+              </tr>
+              <tr>
+                <td class="label">Port Lokal</td>
+                <td class="value">3920 (HTTP / WS)</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity & Security Terminal Log -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Log Aktivitas & Koneksi</span>
+          <button class="btn btn-default" style="padding: 2px 8px; font-size: 11px;" onclick="clearLogs()">
+            Bersihkan
+          </button>
+        </div>
+        <div class="panel-body" style="padding: 12px 16px;">
+          <div class="log-box" id="hostLogBox">
+            <div class="log-entry info"><span class="time">[00:00:00]</span><span class="msg">OmniDesk Engine diinisialisasi.</span></div>
+            <div class="log-entry success"><span class="time">[00:00:01]</span><span class="msg">Windows Native SendInput terhubung via IPC stdin/stdout.</span></div>
+            <div class="log-entry"><span class="time">[00:00:02]</span><span class="msg">Menunggu inisiasi siaran layar lokal...</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: CONTROLLER (KENDALIKAN PC REMOTE) -->
+    <section class="view-section" id="viewController">
+      <!-- Horizontal Address / Quick Connect Bar -->
+      <form class="connect-bar" onsubmit="connectToRemote(event)">
+        <input type="text" id="targetDeviceIdInput" class="input-box" style="flex: 2;" placeholder="ID Perangkat Remote (cth: 782-901-445)" required autocomplete="off">
+        <input type="password" id="targetPinInput" class="input-box" style="flex: 1;" placeholder="PIN Keamanan" required maxlength="12" autocomplete="off">
+        <select id="streamQualitySelect" class="select-box" style="width: 140px;">
+          <option value="balanced" selected>Auto 60 FPS</option>
+          <option value="high">1080p Native</option>
+          <option value="low">Low Bitrate</option>
+        </select>
+        <button type="submit" class="btn btn-primary" id="btnConnectRemote" style="padding: 8px 18px;">
+          Hubungkan
+        </button>
+      </form>
+
+      <!-- Perangkat Terakhir / Riwayat Koneksi -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Riwayat Perangkat Terakhir</span>
+          <span style="font-size: 11px; color: var(--text-dim);">Disimpan secara lokal</span>
+        </div>
+        <div class="panel-body" style="padding: 0;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 40%;">ID Perangkat</th>
+                <th style="width: 30%;">Status Terakhir</th>
+                <th style="width: 30%; text-align: right;">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="recentDevicesList">
+              <tr>
+                <td colspan="3" style="color: var(--text-dim); text-align: center; padding: 24px;">
+                  Belum ada riwayat koneksi. Perangkat yang pernah kamu remote akan tercatat di sini.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Panduan Tombol Cepat -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Daftar Pintasan Keyboard Sesi</span>
+        </div>
+        <div class="panel-body">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px; color: var(--text-muted);">
+            <div>• <strong style="color: var(--text-main);">Ctrl + Shift + Esc:</strong> Buka Task Manager remote</div>
+            <div>• <strong style="color: var(--text-main);">Win + D:</strong> Minimize / Show Desktop remote</div>
+            <div>• <strong style="color: var(--text-main);">Alt + Tab:</strong> Berpindah jendela aplikasi</div>
+            <div>• <strong style="color: var(--text-main);">F11 / Fullscreen:</strong> Mode layar penuh tanpa batas</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- DOCKED HOST IN-SESSION FOOTER BAR (Muncul di layar Host saat sedang dikontrol) -->
+  <div id="hostActiveBanner">
+    <div class="banner-left">
+      <span class="status-dot online"></span>
+      <div>
+        <strong style="color: #FFFFFF; font-size: 12px;">Sesi Remote Aktif</strong>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;" id="hostSessionDuration">Durasi: 00:00</span>
+      </div>
+    </div>
+    <div class="banner-right">
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-main); cursor: pointer;">
+        <input type="checkbox" id="chkAllowInput" checked onchange="toggleHostInputPermission(this.checked)">
+        Izinkan Kontrol Mouse & Keyboard
+      </label>
+      <button class="btn btn-danger" onclick="stopHostSession()">
+        Putus Sesi (ESC x3)
+      </button>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN CONTROLLER WORKSPACE -->
+  <div id="remoteViewerContainer">
+    <!-- Solid Docked Top Bar -->
+    <div class="controller-dock">
+      <div class="dock-group">
+        <span style="font-weight: 700; color: #FFFFFF; font-size: 11px; padding-right: 8px;">OmniDesk Remote</span>
+        <span class="dock-stat" id="remotePingText">-- ms</span>
+        <span class="dock-stat" id="remoteFpsText">60 FPS</span>
+        <span class="dock-stat" style="color: var(--accent-green); border-right: none;">E2E Encrypted</span>
+      </div>
+
+      <div class="dock-group">
+        <button class="dock-btn" onclick="sendSpecialCommand('task_mgr')">Task Manager</button>
+        <button class="dock-btn" onclick="sendSpecialCommand('win_d')">Desktop (Win+D)</button>
+        <button class="dock-btn" onclick="sendSpecialCommand('alt_tab')">Alt+Tab</button>
+        <button class="dock-btn" onclick="toggleChatDrawer()">Chat</button>
+        <button class="dock-btn" onclick="toggleFileDrawer()">Kirim File</button>
+      </div>
+
+      <div class="dock-group">
+        <button class="dock-btn" onclick="toggleRemoteFullscreen()">Fullscreen</button>
+        <button class="btn btn-danger" style="padding: 3px 10px; font-size: 11px;" onclick="disconnectFromRemote()">Putus</button>
+      </div>
+    </div>
+
+    <!-- Video Canvas Wrapper -->
+    <div id="remoteVideoWrapper" tabindex="0">
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <!-- Chat Drawer -->
+    <div class="side-drawer" id="chatDrawer">
+      <div class="drawer-header">
+        <span>Chat Sesi Langsung</span>
+        <button class="btn btn-default" style="padding: 2px 6px; font-size: 10px;" onclick="toggleChatDrawer()">Tutup</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <form class="chat-input-bar" onsubmit="sendChatMessage(event)">
+        <input type="text" id="chatTextInput" class="input-box" style="flex: 1;" placeholder="Ketik pesan..." autocomplete="off">
+        <button type="submit" class="btn btn-primary">Kirim</button>
+      </form>
+    </div>
+
+    <!-- File Transfer Drawer -->
+    <div class="side-drawer" id="fileDrawer">
+      <div class="drawer-header">
+        <span>Transfer File P2P</span>
+        <button class="btn btn-default" style="padding: 2px 6px; font-size: 10px;" onclick="toggleFileDrawer()">Tutup</button>
+      </div>
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">
+          Kirim file dokumen, script, atau installer langsung ke komputer remote melalui jalur data WebRTC terenkripsi.
+        </p>
+        <input type="file" id="fileTransferInput" style="display: none;" onchange="handleFileSelected(event)">
+        <button class="btn btn-default" onclick="document.getElementById('fileTransferInput').click()">
+          Pilih File...
+        </button>
+        <div id="fileTransferStatus" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-dim);">
+          Menunggu file dipilih.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Message Element -->
+  <div class="toast-msg" id="toastMsg"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
