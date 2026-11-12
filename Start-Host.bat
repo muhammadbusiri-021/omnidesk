@@ -35,8 +35,8 @@ start http://localhost:3920/?mode=host
 echo.
 echo ========================================================
 echo   Aplikasi OmniDesk Host Telah Aktif!
-echo   Layar bagikan sekarang terbuka.
-echo   Berikan 9-digit Device ID dan PIN kepada saudaramu.
+echo   Layar siaran siap menerima koneksi.
+echo   Berikan 9-digit Device ID dan PIN kepada operator remote.
 echo ========================================================
 echo.
 pause
