@@ -146,11 +146,18 @@ async function startHostSharing() {
       audio: true
     });
 
-    // Detect track end
-    localStream.getVideoTracks()[0].onended = () => {
-      appendLog('Siaran layar dihentikan oleh pengguna.', 'warn');
-      stopHostSession();
-    };
+    // Optimasi Ketajaman Teks Desktop (Cegah Layar Buram)
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (videoTrack) {
+      if ('contentHint' in videoTrack) {
+        videoTrack.contentHint = 'detail';
+        appendLog('WebRTC ContentHint diatur ke "detail" (prioritas ketajaman teks/layar).', 'info');
+      }
+      videoTrack.onended = () => {
+        appendLog('Siaran layar dihentikan oleh pengguna.', 'warn');
+        stopHostSession();
+      };
+    }
 
     const hostId = document.getElementById('hostDeviceId').innerText.replace(/-/g, '');
     const peerId = `omnidesk-${hostId}`;
@@ -191,6 +198,7 @@ async function startHostSharing() {
       appendLog('Menjawab panggilan video stream dari controller...', 'info');
       call.answer(localStream);
       activeMediaCall = call;
+      applySenderOptimizations(call, window._currentQualityPreference || 'balanced');
       showHostActiveBanner();
     });
 
@@ -211,6 +219,58 @@ async function startHostSharing() {
   }
 }
 
+// Optimasi Parameter WebRTC Sender (Prioritaskan Resolusi & Batasi Bitrate Adaptif)
+function applySenderOptimizations(call, quality = 'balanced') {
+  if (!call || !call.peerConnection) return;
+
+  const configureSenders = () => {
+    try {
+      const senders = call.peerConnection.getSenders();
+      const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+      if (videoSender && videoSender.getParameters) {
+        const params = videoSender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+
+        // Jangan pernah turunkan resolusi (cegah teks buram!)
+        params.degradationPreference = 'maintain-resolution';
+
+        // Konfigurasi bitrate agar tidak tersedak bandwidth upload
+        if (quality === 'high') {
+          params.encodings[0].maxBitrate = 5000000; // 5 Mbps
+          params.encodings[0].maxFramerate = 60;
+        } else if (quality === 'low') {
+          params.encodings[0].maxBitrate = 1200000; // 1.2 Mbps
+          params.encodings[0].maxFramerate = 30;
+        } else {
+          // Default balanced (Rekomendasi)
+          params.encodings[0].maxBitrate = 2500000; // 2.5 Mbps
+          params.encodings[0].maxFramerate = 45;
+        }
+
+        videoSender.setParameters(params).then(() => {
+          appendLog(`Profil video diterapkan: ${quality.toUpperCase()} (maintain-resolution, max: ${(params.encodings[0].maxBitrate/1000000).toFixed(1)} Mbps)`, 'info');
+        }).catch(err => {
+          console.warn('[WebRTC Sender Config Warning]:', err);
+        });
+      }
+    } catch (e) {
+      console.warn('[WebRTC Config Error]:', e);
+    }
+  };
+
+  if (call.peerConnection.connectionState === 'connected') {
+    configureSenders();
+  } else {
+    call.peerConnection.addEventListener('connectionstatechange', () => {
+      if (call.peerConnection.connectionState === 'connected') {
+        configureSenders();
+      }
+    });
+  }
+}
+
 function handleIncomingDataOnHost(conn, data) {
   if (data.type === 'auth') {
     const expectedPin = sessionStorage.getItem('omnidesk_host_pin') || document.getElementById('hostDevicePin').innerText;
@@ -220,7 +280,14 @@ function handleIncomingDataOnHost(conn, data) {
       setTimeout(() => conn.close(), 1000);
       return;
     }
-    appendLog(`Autentikasi BERHASIL untuk remote controller.`, 'success');
+    
+    // Simpan preferensi kualitas dari controller
+    window._currentQualityPreference = data.quality || 'balanced';
+    if (activeMediaCall) {
+      applySenderOptimizations(activeMediaCall, window._currentQualityPreference);
+    }
+
+    appendLog(`Autentikasi BERHASIL untuk remote controller. Kualitas: ${window._currentQualityPreference}`, 'success');
     conn.send({ type: 'auth_result', success: true });
     return;
   }
@@ -359,7 +426,8 @@ async function connectToRemote(event) {
     const conn = currentPeer.connect(targetPeerId, { reliable: true });
 
     conn.on('open', () => {
-      conn.send({ type: 'auth', pin: pinInput });
+      const qualityChoice = document.getElementById('streamQualitySelect') ? document.getElementById('streamQualitySelect').value : 'balanced';
+      conn.send({ type: 'auth', pin: pinInput, quality: qualityChoice });
     });
 
     conn.on('data', (data) => {
@@ -434,6 +502,23 @@ function openRemoteViewer(stream, dataConn) {
   const wrapper = document.getElementById('remoteVideoWrapper');
 
   video.srcObject = stream;
+
+  // Optimasi Latensi Ultra-Rendah (Hilangkan Jitter Buffer Delay)
+  try {
+    if ('playoutDelayHint' in video) {
+      video.playoutDelayHint = 0; // Langsung render frame saat tiba, tanpa buffer buatan
+    }
+    if (activeMediaCall && activeMediaCall.peerConnection) {
+      activeMediaCall.peerConnection.getReceivers().forEach(receiver => {
+        if ('playoutDelayHint' in receiver) {
+          receiver.playoutDelayHint = 0;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[WebRTC Playout Delay Warning]:', e);
+  }
+
   viewer.style.display = 'flex';
   wrapper.focus();
 
